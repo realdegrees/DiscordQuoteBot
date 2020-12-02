@@ -12,10 +12,11 @@ import {
 import { BehaviorSubject } from 'rxjs';
 import logger from '../../../lib/logger';
 import Bot from '../../bot';
+import { InternalError } from '../errors/internal.error';
 import { unicodeEmojiAlphabet } from '../util';
 
 const MAX_ITEMS_PER_PAGE = 16;
-const ALPHABET = unicodeEmojiAlphabet();
+const ALPHABET = unicodeEmojiAlphabet().reverse();
 const CONTROLS = {
     CANCEL: '❌',
     CONFIRM: '✅',
@@ -54,76 +55,86 @@ export class ListEmbed<T extends Exclude<EmbedFieldData, 'inline'>> {
         // Setup the listener for page changes
         this.currentPageIndex.subscribe(async (pageNumber) => {
             this.embed.fields = this.pages[pageNumber].getFields();
-            this.embed.setFooter(`Use the arrow reactions to switch pages\n\nPage ${pageNumber}/${this.pages.length}`)
-
-            await this.resetSelectors();
+            this.embed.setFooter(
+                `Use the arrow reactions to switch pages\n\nPage ${pageNumber}/${this.pages.length}`
+            );
             await this.message?.edit(this.embed);
         });
     }
 
     public async send(channel: TextChannel): Promise<Message> {
         this.message = await channel.send(this.embed);
-
-        if (!this.options?.selectable) {
-            return this.message;
-        }
         await this.addControls();
-        await this.addSelectors(this.pages[0].);
+
+        return this.message;
     }
 
     private async addControls(): Promise<void> {
-       
-        const reactionCollector = this.message!.createReactionCollector(
+        if(!this.message){
+            throw new InternalError('Message object is not yet initialized');
+        }
+        const reactionCollector = this.message.createReactionCollector(
             (_reaction: MessageReaction, user: User) => user.id !== Bot.instance?.user?.id
         );
         reactionCollector.on('collect', async (
             reaction: MessageReaction,
             user: User
         ) => {
-            switch(reaction.emoji.toString()){
+            await reaction.users.remove(user);
+            switch (reaction.emoji.toString()) {
                 case CONTROLS.CANCEL: {
                     await this.message?.delete();
                     break;
                 }
                 case CONTROLS.CONFIRM: {
-                    // Gather all selected items from the cached pages and return them to an "onfinished" event
+                    // Gather all selected items from the cached pages 
+                    // and return them to an "onfinished" event
+                    break;
                 }
                 case CONTROLS.NEXT: {
-                    const newPage = this.currentPageIndex.getValue() + 1;
-                    if(newPage < this.pages.length){
-
+                    const newPageIndex = this.currentPageIndex.getValue() + 1;
+                    if (newPageIndex > this.pages.length - 1) {
+                        break;
                     }
-                    this.currentPageIndex.next()
+                    this.currentPageIndex.next(newPageIndex);
                     break;
                 }
                 case CONTROLS.PREVIOUS: {
-                    await this.message?.delete();
+                    const newPageIndex = this.currentPageIndex.getValue() - 1;
+                    if (newPageIndex < 0) {
+                        break;
+                    }
+                    this.currentPageIndex.next(newPageIndex);
                     break;
                 }
             }
         });
+        await this.message.react(CONTROLS.CANCEL);
+        await this.message.react(CONTROLS.CONFIRM);
 
-        // Adds control buttons
-        await Promise.all(Object.values(CONTROLS).map(this.message!.react));
-    }
-
-    private async addSelectors(fields: EmbedField[]): Promise<void> {
-        const reactionCollector = this.message!.createReactionCollector(
-            (_reaction: MessageReaction, user: User) => user.id !== Bot.instance?.user?.id
-        );
-        reactionCollector.on('collect', async (
-            reaction: MessageReaction,
-            user: User
-        ) => {
-
-        });
-        for (const field of fields) {
-            const emoji = field.name.charAt(2);
-            if (ALPHABET.some((letter) => letter.toString() === emoji)) {
-                await this.message?.react(field.name.charAt(2))
-            }
+        if (this.pages.length > 1) {
+            await this.message.react(CONTROLS.PREVIOUS);
+            await this.message.react(CONTROLS.NEXT);
         }
     }
+
+    // private async addSelectors(fields: EmbedField[]): Promise<void> {
+    //     const reactionCollector = this.message!.createReactionCollector(
+    //         (_reaction: MessageReaction, user: User) => user.id !== Bot.instance?.user?.id
+    //     );
+    //     reactionCollector.on('collect', async (
+    //         reaction: MessageReaction,
+    //         user: User
+    //     ) => {
+
+    //     });
+    //     for (const field of fields) {
+    //         const emoji = field.name.charAt(2);
+    //         if (ALPHABET.some((letter) => letter.toString() === emoji)) {
+    //             await this.message?.react(field.name.charAt(2))
+    //         }
+    //     }
+    // }
 
     private async resetSelectors(): Promise<void> {
         if (!this.message) {
@@ -137,7 +148,8 @@ export class ListEmbed<T extends Exclude<EmbedFieldData, 'inline'>> {
                 .map((user) => reaction.users.remove(user))
             ).then(() => reaction)
         )))
-            .map((reaction) => page.getFields().find((field) => field.name.charAt(0) === reaction.emoji.toString()))
+            .map((reaction) => page.getFields()
+                .find((field) => field.name.charAt(0) === reaction.emoji.toString()))
             .filter((field) => field)
             .forEach((field) => page.setFieldSelected(field, true));
 
@@ -202,5 +214,5 @@ class Page<T extends Exclude<EmbedFieldData, 'inline'>> {
 export type ListEmbedEvent = 'itemSelected';
 interface ListEmbedOptions extends Exclude<MessageEmbedOptions, 'fields'> {
     selectable?: boolean;
-    allowControl?: 'everyone' | 'author'
+    allowControl?: 'everyone' | 'author';
 }
