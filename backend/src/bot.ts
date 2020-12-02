@@ -15,6 +15,7 @@ import { GuildHelper } from './helpers/guild.helper';
  * TODO: Add additional triggers like [channelJoined, guildJoined, etc.]
  */
 class Bot {
+    private static _instance?: Bot;
     public readonly guildHelper: GuildHelper;
     public readonly user: User | null;
     private readonly triggers: Trigger[] = [];
@@ -25,6 +26,11 @@ class Bot {
         this.guildHelper = new GuildHelper(this.client);
         this.user = this.client.user;
     }
+
+    public static get instance() : Bot | undefined {
+        return this._instance;
+    }
+    
 
     public static async init(db: Firebase): Promise<Bot> {
         return new Promise((resolve, reject) => {
@@ -41,7 +47,11 @@ class Bot {
             });
 
             client.login(discordToken)
-                .then(() => new Bot(client, db))
+                .then(() => {
+                    const bot = new Bot(client, db);
+                    this._instance = bot;
+                    return bot;
+                })
                 .then(resolve)
                 .catch(reject);
         });
